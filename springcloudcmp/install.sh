@@ -21,12 +21,7 @@ cmpuser="cmpimuser"
 cmppass="Pbu4@123"
 #节点IP组，用空格格开
 SSH_H="192.168.3.97"
-#MYSQLIP 单机
-MYSQL_H="10.143.132.187"
-#MYSQL相关密码
-MYSQL_ROOT_PASSWORD="Pbu4@123"
-MYSQL_EVUSER_PASSWORD="Pbu4@123"
-MYSQL_IM_PASSWORD="Pbu4@123"
+
 #-----------------------------------------------
 declare -a SSH_HOST=($SSH_H)
 
@@ -569,14 +564,14 @@ echo_yellow "-------------------------------------------"
 echo_green "单机版（小规模）方案，请输入编号：" 
 sleep 3
 clear
-echo "1-----3台服务器,每台16G内存.2台控制节点，1台采集节点"  
+echo "1-----4台服务器,每台16G内存.3台控制节点，1台采集节点"  
 echo "2-----清空部署(数据库不受影响，但升级环境禁止使用)"
 
 while read item
 do
   case $item in
     [1])
-        nodeplanr=2
+        nodeplanr=3
 		ssh-interconnect
 		user-internode
 		install-interpackage

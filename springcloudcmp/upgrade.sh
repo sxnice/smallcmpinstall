@@ -132,8 +132,6 @@ ssh-interconnect(){
 #创建普通用户cmpimuser
 user-internode(){
 	echo_green "建立普通用户开始..."
-	local ssh_pass_path=./ssh-pass.sh
-        $ssh_pass_path $SSH_H
 	for i in "${SSH_HOST[@]}"
 	do
 	echo =======$i=======
@@ -325,13 +323,13 @@ echo_yellow "-------------------------------------------"
 echo_green "单机版（小规模）方案，请输入编号：" 
 sleep 3
 clear
-echo "1-----3台服务器,每台16G内存.2台控制节点，1台采集节点"  
+echo "1-----4台服务器,每台16G内存.3台控制节点，1台采集节点"  
 
 while read item
 do
   case $item in
     [1])
-        nodeplanr=2
+        nodeplanr=3
 		ssh-interconnect
 		user-internode
 		install-interpackage
