@@ -21,7 +21,12 @@ cmpuser="cmpimuser"
 cmppass="Pbu4@123"
 #节点IP组，用空格格开
 SSH_H="192.168.3.97"
-
+#MYSQLIP 单机
+MYSQL_H="10.143.132.187"
+#MYSQL相关密码
+MYSQL_ROOT_PASSWORD="Pbu4@123"
+MYSQL_EVUSER_PASSWORD="Pbu4@123"
+MYSQL_IM_PASSWORD="Pbu4@123"
 #-----------------------------------------------
 declare -a SSH_HOST=($SSH_H)
 
@@ -50,16 +55,19 @@ install-interpackage(){
 		local os=`echo $ostype | awk -F _ '{print $1}'`
 		if [ "$os" == "centos" ]; then
         		local iptables=`ssh -n "$i" rpm -qa |grep iptables |wc -l`
-       			 if [ "$iptables" -gt 0 ]; then
+       			 if [ "$iptables" -gt 1 ]; then
                 		echo "iptables 已安装"
         		else
                 		if [ "${ostype}" == "centos_6" ]; then
                         		 scp  ../packages/centos6_iptables/* "$i":/root/
                          		 ssh -n $i rpm -Uvh ~/iptables-1.4.7-16.el6.x86_64.rpm
-               			 elif [ "${ostype}" == "centos_7" ]; then
-                        		 scp ../packages/centos7_iptables/* "$i":/root/
-                        		 ssh -n $i rpm -Uvh ~/iptables-1.4.21-17.el7.x86_64.rpm ~/libnetfilter_conntrack-1.0.6-1.el7_3.x86_64.rpm ~/libmnl-1.0.3-7.el7.x86_64.rpm ~/libnfnetlink-1.0.1-4.el7.x86_64.rpm ~/iptables-services-1.4.21-17.el7.x86_64.rpm
-               			 fi
+				elif [ "$ostype" == "centos_7" ]; then
+                                        scp -r ../packages/centos7_iptables "$i":/root/
+                                        ssh -Tq $i <<EOF
+                                        rpm -Uvh --replacepkgs ~/centos7_iptables/*
+                                        exit
+EOF
+                                fi
         		fi
 	        	local lsof=`ssh -n "$i" rpm -qa |grep lsof |wc -l`
                 	 if [ "$lsof" -gt 0 ]; then
@@ -104,7 +112,7 @@ install-interpackage(){
 		ssh -n "$i" mkdir -p "$JDK_DIR"
 		scp -r ../packages/jdk/* "$i":"$JDK_DIR"
 		scp ../packages/jce/* "$i":"$JDK_DIR"/jre/lib/security/
-		ssh $i  <<EOF
+		ssh -Tq $i <<EOF
 		    chmod 755 "$JDK_DIR"/bin/*
 		    sed -i /JAVA_HOME/d /etc/profile
 		    echo JAVA_HOME="$JDK_DIR" >> /etc/profile
@@ -122,7 +130,7 @@ install-interpackage(){
 		
 EOF
 		echo "系统配置节点"$i
-		ssh "$i" <<EOF
+		ssh -Tq "$i" <<EOF
 		    sed -i /$cmpuser/d /etc/security/limits.conf
 		    echo $cmpuser soft nproc unlimited >>/etc/security/limits.conf
 		    echo $cmpuser hard nproc unlimited >>/etc/security/limits.conf
@@ -140,6 +148,9 @@ ssh-interconnect(){
     echo_green "建立对等互信开始..."
 	local ssh_init_path=./ssh-init.sh
         $ssh_init_path $SSH_H
+	if [ $? -eq 1 ]; then
+		exit 1
+	fi
 	echo_green "建立对等互信完成..."
 }
 
@@ -149,7 +160,7 @@ user-internode(){
 	for i in "${SSH_HOST[@]}"
 	do
 	echo =======$i=======
-	ssh $i <<EOF
+	ssh -Tq $i <<EOF
 	groupadd $cmpuser
  	useradd -m -s  /bin/bash -g $cmpuser $cmpuser
  	usermod -G $cmpuser $cmpuser
@@ -172,7 +183,7 @@ copy-internode(){
                         ssh -n $i mkdir -p $CURRENT_DIR
                         scp -r ./background ./im ./config startIM.sh startIM_BX.sh stopIM.sh imstart_chk.sh "$i":$CURRENT_DIR
                         #赋权
-                        ssh $i <<EOF
+                        ssh -Tq $i <<EOF
                         rm -rf /tmp/spring.log
                         rm -rf /tmp/modelTypeName.data
                         chown -R $cmpuser.$cmpuser $CURRENT_DIR
@@ -248,7 +259,7 @@ env_internode(){
 
 			echo "节点："$j
 			
-			ssh $j <<EOF
+			ssh -Tq $j <<EOF
                         sed -i /nodeplan/d /etc/environment
 			sed -i /nodetype/d /etc/environment
 			sed -i /nodeno/d /etc/environment
@@ -336,7 +347,7 @@ start_internode(){
 			continue
 		fi
 		echo "检测节点"$i
-		 ssh $i <<EOF
+		 ssh -Tq $i <<EOF
 		 su - $cmpuser
 		 source /etc/environment
 		 umask 077
@@ -350,45 +361,69 @@ EOF
 		echo_green "启动IM完成..."
 }
 
-#关闭im
+#关闭cmp
 stop_internode(){
-		echo_green "关闭IM开始..."
-		
-		for i in "${SSH_HOST[@]}"
-		do
-		echo "关闭节点"$i
+	echo_green "关闭IM开始..."
+	for i in "${SSH_HOST[@]}"
+	do
+		echo "关闭节点IM服务"$i
+		#local user=`ssh -n $i cat /etc/passwd | sed -n /$cmpuser/p |wc -l`
 		local user=`ssh -n $i cat /etc/passwd | awk -F : '{print \$1}' | grep -w $cmpuser |wc -l`
-                if [ "$user" -eq 1 ]; then
+		if [ "$user" -eq 1 ]; then
 			local jars=`ssh -n $i ps -u $cmpuser | grep -v PID | wc -l`
 			if [ "$jars" -gt 0 ]; then
-				ssh $i <<EOF
+				ssh -Tq $i <<EOF
 				killall -9 -u $cmpuser
 				exit
 EOF
 				echo "complete"
 			else
-				echo "IM已关闭"
+				echo "CMP已关闭"
 			fi
 		else
-			echo_red "尚未创建$cmpuser用户,请手动关闭服务"
-			exit
+			echo_yellow "尚未创建$cmpuser用户,请手动关闭服务!"
+		#	exit
 		fi
-		done
-		echo_green "所有节点IM关闭完成..."
+		
+	done
+
+	echo_green "所有节点关闭完成..."
 }
 
 #清空安装
 uninstall_internode(){
-		echo_green "清空安装开始..."
-		for i in "${SSH_HOST[@]}"
-		do
-		echo "删除节点"$i
-		ssh $i <<EOF
+	echo_green "清空安装开始(im平台)..."
+
+	for i in "${SSH_HOST[@]}"
+	do
+		echo "删除节点IM包"$i
+		ssh -Tq $i <<EOF
 		rm -rf "$CURRENT_DIR"
-		rm -rf /home/cmpimuser/
+		rm -rf /home/$cmpuser/
 		rm -rf /usr/java/
 		rm -rf /tmp/*
-		userdel cmpimuser
+		exit
+EOF
+	done
+
+
+	
+
+        for i in "${SSH_HOST[@]}"
+        do               
+		echo "删除节点im用户"$i
+		local imuser=`ssh -n $i cat /etc/passwd | sed -n /$cmpuser/p |wc -l`
+                if [ "$imuser" -eq 1 ]; then
+			ssh -n $i userdel -f $cmpuser
+		fi
+	done
+	
+        for i in "${SSH_HOST[@]}"
+        do
+                echo "删除节点cmpiptables"$i
+		local iptables=`ssh -n $i iptables -L INPUT | sed -n /cmp/p |wc -l`
+		if [ "$iptables" -gt 0 ]; then
+		ssh -Tq $i <<EOF
 		iptables -P INPUT ACCEPT
 		iptables -D INPUT -j cmp
 		iptables -F cmp
@@ -397,10 +432,14 @@ uninstall_internode(){
 		iptables-save > /etc/sysconfig/iptables
 		exit
 EOF
-		echo "complete"
-		done
-		echo_green "清空安装完成..."
+		fi
+		echo "complete..."
+	done
+
+
+	echo_green "清空安装完成..."
 }
+
 
 #安装单机版mysql5.7
 ssh-mysqlconnect(){
@@ -506,7 +545,7 @@ mysql_install(){
 		echo_green "复制文件"
 		ssh -n "$MYSQL_H" mkdir -p "$MYSQL_DIR"
 		scp -r ../packages/mysql/* "$MYSQL_H":"$MYSQL_DIR"
-		ssh $MYSQL_H <<EOF
+		ssh -Tq $MYSQL_H <<EOF
 		echo "创建mysql用户"
 		groupadd mysql
 		useradd -r -g mysql -s /bin/false mysql
@@ -552,20 +591,8 @@ iptables-mysql(){
 }
 
 
-echo_yellow "-----------一键安装说明-------------------"
-echo_yellow "1、安装前，请确认是否安装mysql;"
-echo_yellow "2、可安装JDK1.8软件;"
-echo_yellow "3、可安装有iptables lsof软件;"
-echo_yellow "4、初始化时，建议使用root用户安装;"
-echo_yellow "5、确保.sh有执行权限，并且使用 ./xxx.sh执行;"
-echo_yellow "6、可清空部署环境。"
-
-echo_yellow "-------------------------------------------"
-echo_green "单机版（小规模）方案，请输入编号：" 
-sleep 3
-clear
 echo "1-----4台服务器,每台16G内存.3台控制节点，1台采集节点"  
-echo "2-----清空部署(数据库不受影响，但升级环境禁止使用)"
+echo "100-----清空部署(数据库不受影响，但升级环境禁止使用)"
 
 while read item
 do
@@ -581,7 +608,7 @@ do
 		start_internode
         break
         ;;
-     [2])
+     100)
 		ssh-interconnect
 		stop_internode
 		uninstall_internode

@@ -9,21 +9,17 @@ generate_key(){
     fi
 }
 
-#ssh-keygen -t rsa <<eof
-#
-#
-#
-#
-#eof
 
 generate_key
 
 for i in "$@"
 do
  echo =======$i=======
-# ssh -o StrictHostKeyChecking=no $i 
  ssh-copy-id -i ~/.ssh/id_rsa.pub $i
-
+ if [ $? -eq 1 ]; then
+        echo "你已多次输错密码，脚本将终止执行！"
+        exit 1
+ fi
 done
 
 rm -rf $wd

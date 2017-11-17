@@ -8,7 +8,7 @@ nodetyper=1
 nodeplanr=1
 nodenor=1
 eurekaipr=localhost
-dcnamer="DC1"
+dcnamer=DC1
 JDK_DIR="/usr/java"
 
 
@@ -18,14 +18,10 @@ CURRENT_DIR="/springcloudcmp"
 #用户名，密码
 cmpuser="cmpimuser"
 cmppass="Pbu4@123"
-#IM节点IP组，用空格格开
+#节点IP组，用空格格开
 SSH_H="10.143.132.187"
-#扩容采集节点组，用空格格开
-GF_H="10.143.132.189 10.143.132.190"
 #-----------------------------------------------
-declare -a GF_HOST=($GF_H)
 declare -a SSH_HOST=($SSH_H)
-declare -a IM_HOST=($SSH_H $GF_H)
 
 #检测操作系统
 check_ostype(){
@@ -45,26 +41,23 @@ check_ostype(){
 #检测安装软件
 install-interpackage(){
 	echo_green "环境检测开始..."
-	for i in "${GF_HOST[@]}"
+	for i in "${SSH_HOST[@]}"
             do
 		echo "安装依赖包到"$i
 		local ostype=`check_ostype $i`
 		local os=`echo $ostype | awk -F _ '{print $1}'`
 		if [ "$os" == "centos" ]; then
         		local iptables=`ssh -n "$i" rpm -qa |grep iptables |wc -l`
-       			 if [ "$iptables" -gt 1 ]; then
+       			 if [ "$iptables" -gt 0 ]; then
                 		echo "iptables 已安装"
         		else
                 		if [ "${ostype}" == "centos_6" ]; then
                         		 scp  ../packages/centos6_iptables/* "$i":/root/
                          		 ssh -n $i rpm -Uvh ~/iptables-1.4.7-16.el6.x86_64.rpm
-				elif [ "$ostype" == "centos_7" ]; then
-                                        scp -r ../packages/centos7_iptables "$i":/root/
-                                        ssh -Tq $i <<EOF
-                                        rpm -Uvh --replacepkgs ~/centos7_iptables/*
-                                        exit
-EOF
-                                fi
+               			 elif [ "${ostype}" == "centos_7" ]; then
+                        		 scp ../packages/centos7_iptables/* "$i":/root/
+                        		 ssh -n $i rpm -Uvh ~/iptables-1.4.21-17.el7.x86_64.rpm ~/libnetfilter_conntrack-1.0.6-1.el7_3.x86_64.rpm ~/libmnl-1.0.3-7.el7.x86_64.rpm ~/libnfnetlink-1.0.1-4.el7.x86_64.rpm ~/iptables-services-1.4.21-17.el7.x86_64.rpm
+               			 fi
         		fi
 	        	local lsof=`ssh -n "$i" rpm -qa |grep lsof |wc -l`
                 	 if [ "$lsof" -gt 0 ]; then
@@ -97,7 +90,7 @@ EOF
 		ssh -n "$i" mkdir -p "$JDK_DIR"	
 		scp -r ../packages/jdk/* "$i":"$JDK_DIR"
 		scp ../packages/jce/* "$i":"$JDK_DIR"/jre/lib/security/
-		ssh -Tq $i <<EOF
+		ssh $i  <<EOF
 		    chmod 755 "$JDK_DIR"/bin/*
 		    sed -i /JAVA_HOME/d /etc/profile
 		    echo JAVA_HOME="$JDK_DIR" >> /etc/profile
@@ -115,7 +108,7 @@ EOF
 		
 EOF
                 echo "系统配置节点"$i
-                ssh -Tq "$i" <<EOF
+                ssh "$i" <<EOF
                     sed -i /$cmpuser/d /etc/security/limits.conf
                     echo $cmpuser soft nproc unlimited >>/etc/security/limits.conf
                     echo $cmpuser hard nproc unlimited >>/etc/security/limits.conf
@@ -130,22 +123,21 @@ EOF
 
 #建立对等互信
 ssh-interconnect(){
-    	echo_green "建立对等互信开始..."
+    echo_green "建立对等互信开始..."
 	local ssh_init_path=./ssh-init.sh
-	$ssh_init_path ${IM_HOST[@]}
-	if [ $? -eq 1 ]; then
-		exit 1
-	fi
+        $ssh_init_path $SSH_H
 	echo_green "建立对等互信完成..."
 }
 
 #创建普通用户cmpimuser
 user-internode(){
 	echo_green "建立普通用户开始..."
-	for i in "${GF_HOST[@]}"
+	local ssh_pass_path=./ssh-pass.sh
+        $ssh_pass_path $SSH_H
+	for i in "${SSH_HOST[@]}"
 	do
 	echo =======$i=======
-	ssh -Tq $i <<EOF
+	ssh $i <<EOF
 	groupadd $cmpuser
  	useradd -m -s  /bin/bash -g $cmpuser $cmpuser
  	usermod -G $cmpuser $cmpuser
@@ -161,14 +153,14 @@ copy-internode(){
 	echo_green "复制文件到各节点开始..."
 	case $nodeplanr in
           [1-4]) #部署
-                for i in "${GF_HOST[@]}"
+                for i in "${SSH_HOST[@]}"
                 do
                         echo "复制文件到"$i 
                         #放根目录下
                         ssh -n $i mkdir -p $CURRENT_DIR
                         scp -r ./background ./im ./config startIM.sh startIM_BX.sh stopIM.sh imstart_chk.sh  "$i":$CURRENT_DIR
                         #赋权
-                        ssh -Tq $i <<EOF
+                        ssh $i <<EOF
                         rm -rf /tmp/spring.log
                         rm -rf /tmp/modelTypeName.data
                         chown -R $cmpuser.$cmpuser $CURRENT_DIR
@@ -205,102 +197,107 @@ EOF
 	echo_green "复制文件到各节点完成..."
 }
 
-
-#配置扩容采集节点环境变量
-env_gfnode(){
-                echo_green "配置扩容采集节点环境变量开始..."
-                for j in "${GF_HOST[@]}"
-		do
-		echo "配置节点"$j
-			
-			if [ $nodeplanr -ne 1 ]; then
-			echo "节点类型，请输入编号："  
-			echo "2-----采集节点."    
-			echo "3-----控制以及采集节点."    
-			read nodetyper 
-			
-			echo "请输入主控制节点IP："  
-			read eurekaipr 
-			fi
-
-			if [ $nodetyper -eq 2 ] || [ $nodetyper -eq 3 ]; then
-			read -t 5 -p "请输入采集节点名称，如DC1:" dcnamer
-                        dcnamer=${dcnamer:-"DC1"}
-			fi
-			
-			nodenor=0
-			
-			
-			echo "设置nodeplan="$nodeplanr
-			echo "设置nodetype="$nodetyper
-			echo "设置nodeno="$nodenor	
-			echo "设置eurekaip="$eurekaipr
-			echo "设置dcname="$dcnamer
-
-			echo "节点："$j
-			
-			ssh -Tq $j <<EOF
-                        sed -i /nodeplan/d /etc/environment
-			sed -i /nodetype/d /etc/environment
-			sed -i /nodeno/d /etc/environment
-			sed -i /eurekaip/d /etc/environment
-			sed -i /eurekaiprep/d /etc/environment
-			sed -i /dcname/d /etc/environment
-			
-			echo "nodeplan=$nodeplanr export nodeplan">>/etc/environment
-			echo "nodetype=$nodetyper export nodetype">>/etc/environment
-			echo "nodeno=$nodenor export nodeno">>/etc/environment 
-			echo "eurekaip=$eurekaipr export eurekaip">>/etc/environment
-			echo "eurekaiprep=$eurekaipr export eurekaiprep">>/etc/environment
-			echo "dcname=$dcnamer export dcname">>/etc/environment 			
+#配置各节点环境变量
+env_internode(){
+        
+		echo_green "配置各节点环境变量开始..."
+		for j in "${SSH_HOST[@]}"
+			do
+			echo "配置节点"$j
+			ssh $j <<EOF			
 			source /etc/environment
 			su - $cmpuser
+			
 			sed -i /nodeplan/d ~/.bashrc
-                        sed -i /nodetype/d ~/.bashrc
-                        sed -i /nodeno/d ~/.bashrc
-                        sed -i /eurekaip/d ~/.bashrc
+         		sed -i /nodetype/d ~/.bashrc
+           	 	sed -i /nodeno/d ~/.bashrc
+            		sed -i /eurekaip/d ~/.bashrc
 			sed -i /eurekaiprep/d ~/.bashrc
-                        sed -i /dcname/d ~/.bashrc
+            		sed -i /dcname/d ~/.bashrc
 			
 			echo "umask 077" >> ~/.bashrc
-			echo "CURRENT_DIR=$CURRENT_DIR export CURRENT_DIR" >> ~/.bashrc
-			echo "nodeplan=$nodeplanr export nodeplan">>~/.bashrc
-                        echo "nodetype=$nodetyper export nodetype">>~/.bashrc
-                        echo "nodeno=$nodenor export nodeno">>~/.bashrc 
-                        echo "eurekaip=$eurekaipr export eurekaip">>~/.bashrc
-			echo "eurekaiprep=$eurekaipr export eurekaiprep">>~/.bashrc
-                        echo "dcname=$dcnamer export dcname">>~/.bashrc 
+			echo "CURRENT_DIR=$CURRENT_DIR" >> ~/.bashrc
+			sed -n /nodeplan/p /etc/environment>>~/.bashrc 
+			echo "export nodeplan">>~/.bashrc
+			sed -n /nodetype/p /etc/environment>>~/.bashrc
+			echo "export nodetype">>~/.bashrc
+			sed -n /nodeno/p /etc/environment>>~/.bashrc
+			echo "export nodeno">>~/.bashrc
+			sed -n /eurekaip/p /etc/environment>>~/.bashrc
+			echo "export eurekaip">>~/.bashrc
+			sed -n /eurekaiprep/p /etc/environment>>~/.bashrc
+                        echo "export eurekaiprep">>~/.bashrc
+			sed -n /dcname/p /etc/environment>>~/.bashrc 
+			echo "export dcname">>~/.bashrc
 			source ~/.bashrc
 			exit
 EOF
 		
 		echo "complete..." 
 		done
-		echo_green "配置扩容采集节点环境变量结束..."
+		echo_green "配置各节点环境变量结束..."
+	
 }
 
 #配置iptables
 iptable_internode(){
         echo_green "配置各节点iptables开始..."
         local iptable_path=./iptablescmp.sh
-        $iptable_path "${IM_HOST[@]}"
-	echo_green "配置各节点iptables结束..."
+        $iptable_path $SSH_H
+		echo_green "配置各节点iptables结束..."
 }
 
-#启动im
+#启动cmp
 start_internode(){
-		echo_green "启动采集开始..."
-		for i in "${GF_HOST[@]}"
+		echo_green "启动CMP开始..."
+		#启动主控节点1或集中式启动串行启动！
+		local k=0
+		for i in "${SSH_HOST[@]}"
 		do
+			echo "启动节点"$i
+			ssh $i <<EOF
+			su - $cmpuser
+			source /etc/environment
+			umask 077
+			cd "$CURRENT_DIR"
+			./startIM.sh
+			exit
+EOF
+			echo "节点"$i"启动完成"
+			break
+		done
+		
+		#启动其他节点!
+		for i in "${SSH_HOST[@]}"
+		do
+		if [ "$k" -eq 0 ];then
+			let k=k+1
+			continue
+		fi
 		echo "启动节点"$i
+	#	 ssh $i <<EOF
+	#	 su - $cmpuser
+	#	 source /etc/environment
+	#	 umask 077
+	#	 cd "$CURRENT_DIR"
+	#	 ./startIM_BX.sh
+#		 exit
+#EOF
 		ssh -nf $i 'su - '$cmpuser' -c '$CURRENT_DIR'/startIM_BX.sh >/dev/null'
+		let k=k+1
 		echo "发启启动指令成功"
 		done
 		
-		for i in "${GF_HOST[@]}"
+		#检测其他节点服务是否成功!
+		k=0
+		for i in "${SSH_HOST[@]}"
 		do
+		if [ "$k" -eq 0 ];then
+			let k=k+1
+			continue
+		fi
 		echo "启动节点"$i
-		 ssh -Tq $i <<EOF
+		 ssh $i <<EOF
 		 su - $cmpuser
 		 source /etc/environment
 		 umask 077
@@ -308,11 +305,20 @@ start_internode(){
 		 ./imstart_chk.sh
 		 exit
 EOF
+		let k=k+1
 		echo "节点启动成功"
 		done
-		echo_green "启动采集完成..."
+		echo_green "启动CMP完成..."
 }
 
+#安装单机版mysql5.7
+ssh-mysqlconnect(){
+    echo_green "建立对等互信开始..."
+        local ssh_init_path=./ssh-init.sh
+        $ssh_init_path $MYSQL_H
+        echo_green "建立对等互信完成..."
+        sleep 1
+}
 
 
 echo_yellow "-----------一键安装（增量）说明-------------------"
@@ -320,22 +326,59 @@ echo_yellow "1、可安装JDK软件;"
 echo_yellow "2、可安装有iptables lsof软件;"
 echo_yellow "3、初始化时，建议使用root用户安装;"
 echo_yellow "4、确保.sh有执行权限，并且使用 ./xxx.sh执行;"
+echo_yellow "5、可配置数据库连接,并更新jce;"
 echo_yellow "-------------------------------------------"
-echo_green "单机版（小规模）方案，请输入编号：" 
+echo_green "控制节点节点方案，请输入编号：" 
 sleep 3
 clear
-echo "1-----3台服务器(每台16G内存.2台控制节点，1台采集节点) + 扩容采集节点N台"  
+echo "1-----allinone服务器,每台32G内存." 
+echo "2-----3台服务器,每台16G内存.2台控制节点，1台采集节点"  
+echo "3-----4台服务器,每台16G内存.3台控制节点，1台采集节点"  
+echo "4-----6台服务器,每台8G内存.5台控制节点，1台采集节点"
 
 while read item
 do
   case $item in
     [1])
+        nodeplanr=1
+		ssh-interconnect
+		user-internode
+		install-interpackage
+		copy-internode
+		env_internode
+		iptable_internode
+		start_internode
+        break
+        ;;
+    [2])
         nodeplanr=2
 		ssh-interconnect
 		user-internode
 		install-interpackage
 		copy-internode
-		env_gfnode
+		env_internode
+		iptable_internode
+		start_internode
+        break
+        ;;
+    [3])
+        nodeplanr=3
+		ssh-interconnect
+		user-internode
+		install-interpackage
+		copy-internode
+		env_internode
+		iptable_internode
+		start_internode
+        break
+        ;;
+    [4])
+        nodeplanr=4
+		ssh-interconnect
+		user-internode
+		install-interpackage
+		copy-internode
+		env_internode
 		iptable_internode
 		start_internode
         break

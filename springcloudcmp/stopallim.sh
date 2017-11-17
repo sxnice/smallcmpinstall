@@ -35,7 +35,7 @@ stop_internode(){
                 if [ "$user" -eq 1 ]; then
                         local jars=`ssh $i ps -u $cmpuser | grep -v PID | wc -l`
                         if [ "$jars" -gt 0 ]; then
-                                ssh $i <<EOF
+                                ssh -Tq $i <<EOF
                                 killall -9 -u $cmpuser
                                 exit
 EOF
