@@ -163,6 +163,8 @@ EOF
 				exit
 			fi
 		fi
+                #检测是否存在tmp
+                ssh -n "$i" mkdir -p /tmp
 		echo_green "复制文件"
 		ssh -n "$i" mkdir -p "$MYSQL_DIR"
 		scp ./*.sh "$i":/root/
@@ -330,13 +332,10 @@ EOF
                                 exit
 EOF
 		fi
+		
+		echo "删除mysql文件"
+		ssh -n $i rm -rf "$MYSQL_DIR"
 
-		ssh -Tq $i <<EOF
-		rm -rf "$MYSQL_DIR"
-                rm -rf "$KEEPALIVED_DIR"
-                rm -rf /etc/keepalived/
-		exit
-EOF
 		echo "删除mysql节点iptables"$i
                 local iptables=`ssh -n $i iptables -L INPUT | sed -n /mysqldb/p |wc -l`
                 if [ "$iptables" -gt 0 ]; then
@@ -369,8 +368,7 @@ do
 		iptables-mysql
         break
         ;;
-    100)	
-	    ssh-mysqlconnect
+    100)	ssh-mysqlconnect
 		uninstall_mysql
 	break
 	;;

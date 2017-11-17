@@ -108,8 +108,13 @@ EOF
                                 exit
 			fi
 		fi
+                #检测是否存在tmp
+                ssh -n "$i" mkdir -p /tmp
                 echo "安装jdk1.8到节点"$i
-		ssh -n "$i" mkdir -p "$JDK_DIR"
+                ssh -Tq "$i" <<EOF
+                rm -rf "$JDK_DIR"
+                mkdir -p "$JDK_DIR"
+EOF
 		scp -r ../packages/jdk/* "$i":"$JDK_DIR"
 		scp ../packages/jce/* "$i":"$JDK_DIR"/jre/lib/security/
 		ssh -Tq $i <<EOF
@@ -392,7 +397,7 @@ EOF
 
 #清空安装
 uninstall_internode(){
-	echo_green "清空安装开始(im平台)..."
+	echo_green "清空安装开始(im平台,redis,mongo,iptables,keepalived)..."
 
 	for i in "${SSH_HOST[@]}"
 	do
