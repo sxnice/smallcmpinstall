@@ -112,8 +112,11 @@ EOF
                 ssh -n "$i" mkdir -p /tmp
                 echo "安装jdk1.8到节点"$i
                 ssh -Tq "$i" <<EOF
+                sed -i /'umask 077'/d ~/.bashrc
+                source ~/.bashrc
                 rm -rf "$JDK_DIR"
                 mkdir -p "$JDK_DIR"
+		chmod 755 "$JDK_DIR"
 EOF
 		scp -r ../packages/jdk/* "$i":"$JDK_DIR"
 		scp ../packages/jce/* "$i":"$JDK_DIR"/jre/lib/security/
